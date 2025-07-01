@@ -1,10 +1,10 @@
 import asyncio
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 # import python_multipart_form  # This is needed for Form/File to work
 
-from agent.agent import run_agent_research
+from agent.multi_agent import run_multi_agent_research
 from core.config import settings
 from openai import OpenAI
 
@@ -22,6 +22,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        self.active_connections[client_id] = websocket
+
+    def disconnect(self, client_id: str):
+        if client_id in self.active_connections:
+            del self.active_connections[client_id]
+
+    async def send_personal_message(self, message: str, client_id: str):
+        if client_id in self.active_connections:
+            await self.active_connections[client_id].send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections.values():
+            await connection.send_text(message)
+
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await manager.connect(websocket, client_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.send_personal_message(f"You wrote: {data}", client_id)
+    except WebSocketDisconnect:
+        manager.disconnect(client_id)
+        await manager.broadcast(f"Client #{client_id} left the chat")
+
+
+@app.get("/", summary="Root Endpoint")
+async def root():
+    """Provides a welcome message and a link to the API documentation."""
+    return JSONResponse(
+        content={
+            "message": "how about this!",
+            "docs_url": "/docs"
+        }
+    )
+
 
 @app.get("/status", summary="Health Check")
 async def status():
@@ -48,7 +96,7 @@ async def query(query: str = Form(...), file: UploadFile = File(None)):
 
     # Use a streaming response to send server-sent events (SSE)
     return StreamingResponse(
-        run_agent_research(query, file_id),
+        run_multi_agent_research(query, file_id),
         media_type="text/event-stream"
     )
 
@@ -65,3 +113,7 @@ async def get_file(file_id: str):
         return StreamingResponse(iter([file_bytes]), media_type="application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"File not found or could not be retrieved: {e}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, log_level="debug")
