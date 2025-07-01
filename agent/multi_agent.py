@@ -22,7 +22,8 @@ class MultiAgent(BaseAgent):
     def __init__(self):
         super().__init__()
 
-    def run():
+    async def run(self, *args, **kwargs):
+        """Execute the agent's main logic."""
         pass
 
     async def run_agent(self, assistant_id: str, user_input: str, file_id: Optional[str] = None) -> str:
