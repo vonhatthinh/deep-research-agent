@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 # import python_multipart_form  # This is needed for Form/File to work
 
-from agent.multi_agent import run_multi_agent_research
+from agent.multi_agent import MultiAgent
 from core.config import settings
 from openai import OpenAI
 
@@ -23,6 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+multi_agent = MultiAgent()
 
 class ConnectionManager:
     def __init__(self):
@@ -95,10 +96,11 @@ async def query(query: str = Form(...), file: UploadFile = File(None)):
             raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
 
     # Use a streaming response to send server-sent events (SSE)
-    return StreamingResponse(
-        run_multi_agent_research(query, file_id),
-        media_type="text/event-stream"
-    )
+    # return StreamingResponse(
+    #     run_multi_agent_research(query, file_id),
+    #     media_type="text/event-stream"
+    # )
+    return multi_agent.run_multi_agent_research(query, file_id)
 
 
 @app.get("/files/{file_id}", summary="Retrieve a Generated File")
