@@ -22,6 +22,9 @@ class MultiAgent(BaseAgent):
     def __init__(self):
         super().__init__()
 
+    def run():
+        pass
+
     async def run_agent(self, assistant_id: str, user_input: str, file_id: Optional[str] = None) -> str:
         thread = client.beta.threads.create()
 
