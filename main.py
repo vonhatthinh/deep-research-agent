@@ -17,7 +17,7 @@ client = OpenAI(api_key=settings.OPENAI_API_KEY)
 # Configure CORS for frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to your frontend's domain
+    allow_origins=["http://localhost:3000"],  # Add your actual frontend domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,7 +65,7 @@ async def root():
     """Provides a welcome message and a link to the API documentation."""
     return JSONResponse(
         content={
-            "message": "how about this!",
+            "message": "this is the Deep Research Assistant API",
             "docs_url": "/docs"
         }
     )
@@ -101,7 +101,7 @@ async def query(query: str = Form(...), file: UploadFile = File(None)):
     )
 
 
-app.get("/files/{file_id}", summary="Retrieve a Generated File")
+@app.get("/files/{file_id}", summary="Retrieve a Generated File")
 async def get_file(file_id: str):
     """
     Downloads a file (e.g., a generated chart) from OpenAI and returns it.

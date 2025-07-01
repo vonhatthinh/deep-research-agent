@@ -20,8 +20,8 @@ st.markdown("Provide a topic, question, or document, and the AI agent will condu
 with st.sidebar:
     st.header("Controls")
     query = st.text_area("Enter your research query:", height=150)
-    uploaded_file = st.file_uploader("Upload a document (optional)", type=['pdf', 'docx', 'csv', 'txt'])
-    start_button = st.button("Start Research")
+    uploaded_file = st.file_uploader("Upload a document (optional)", type=['pdf', 'docx', 'csv', 'txt', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg'])
+    start_button = st.button("Send Message")
     debug_mode = st.checkbox("Enable debug mode")
 
 
