@@ -19,6 +19,7 @@ def tavily_web_search(query: str) -> str:
     Performs a web search using the Tavily API.
     This function is designed to be called by the OpenAI Assistant.
     """
+    print(f"--- Running Tool: tavily_web_search ---")
     print(f"INFO: Performing Tavily search for query: {query}")
     try:
         result = tavily_client.search(query, search_depth="advanced", max_results=5)
@@ -26,6 +27,7 @@ def tavily_web_search(query: str) -> str:
         formatted_results = "\n\n".join(
             [f"Source: {res['url']}\nContent: {res['content']}" for res in result['results']]
         )
+        print(f"INFO: Tavily search results:\n{formatted_results[:2000]}...")
         return formatted_results
     except Exception as e:
         print(f"ERROR: Tavily search failed: {e}")
@@ -37,26 +39,41 @@ def selenium_get_web_content(url: str) -> str:
     Uses Selenium to fetch the main content of a web page from the given URL.
     This function is designed to be called by the OpenAI Assistant.
     """
+    print(f"--- Running Tool: selenium_get_web_content ---")
     print(f"INFO: Fetching web content via Selenium for URL: {url}")
+    driver = None
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
         import time
 
         chrome_options = Options()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+
         driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(30)  # 30 second timeout
         driver.get(url)
-        time.sleep(2)  # Wait for page to load
-        body = driver.find_element(By.TAG_NAME, 'body').text
-        driver.quit()
-        return body[:5000]  # Limit to 5000 chars for brevity
+
+        # Wait until the <body> element is present (up to 10 seconds)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, 'body'))
+        )
+        # Extract the main content from the body
+        body = driver.find_element(By.TAG_NAME, 'body')
+        content = body.text
+        print(f"INFO: Extracted content from {url}:\n--- START OF CONTENT ---\n{content[:2000]}...\n--- END OF CONTENT ---")
+        return content if content else "No content found on the page."
     except Exception as e:
-        print(f"ERROR: Selenium fetch failed: {e}")
+        print(f"ERROR: Failed to fetch web content: {e}")
         return f"Error fetching web content: {e}"
+    finally:
+        if driver:
+            driver.quit()
 
 
 def process_and_store_file(file_id: str) -> str:
@@ -64,25 +81,38 @@ def process_and_store_file(file_id: str) -> str:
     Processes a file (PDF or text), extracts its content, and stores it in the vector database.
     Use this tool to make the content of a file available for semantic search.
     """
+    print(f"--- Running Tool: process_and_store_file ---")
     print(f"INFO: Processing file for vector storage: {file_id}")
     try:
+        # Get file metadata first
+        file_info = client.files.retrieve(file_id)
+        filename = file_info.filename.lower()
+        file_size = file_info.bytes if hasattr(file_info, 'bytes') else None
+
+        # Check file size limit (e.g., 50MB)
+        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+        if file_size and file_size > MAX_FILE_SIZE:
+            return f"File too large ({file_size} bytes). Maximum supported size is {MAX_FILE_SIZE} bytes."
+
         file_content_response = client.files.content(file_id)
         file_content = file_content_response.read()
 
-        # Use client.files.retrieve to get file metadata, including filename
-        file_info = client.files.retrieve(file_id)
-        filename = file_info.filename.lower()
-        
         text_content = ""
         if filename.endswith('.pdf'):
-            pdf_reader = PyPDF2.PdfReader(BytesIO(file_content))
-            for page in pdf_reader.pages:
-                text_content += page.extract_text() or ""
+            try:
+                pdf_reader = PyPDF2.PdfReader(BytesIO(file_content))
+                if pdf_reader.is_encrypted:
+                    return f"Cannot process encrypted PDF file: {filename}"
+                for page in pdf_reader.pages:
+                    text_content += page.extract_text() or ""
+            except Exception as pdf_error:
+                return f"Failed to process PDF file: {str(pdf_error)}"
         elif filename.endswith(('.txt', '.md', '.csv')):
             text_content = file_content.decode('utf-8')
         else:
             return f"Unsupported file type: {filename}. Only PDF, TXT, MD, and CSV are supported for text extraction."
 
+        print(f"INFO: Extracted content from {filename}:\n--- START OF CONTENT ---\n{text_content[:2000]}...\n--- END OF CONTENT ---")
         # Add extracted text to the vector store
         add_text_to_vector_store(text_content)
         return f"Successfully processed and stored the content of file {file_id} in the vector database."
@@ -91,13 +121,13 @@ def process_and_store_file(file_id: str) -> str:
         print(f"ERROR: Failed to process file {file_id}: {e}")
         return f"Error processing file: {e}"
 
-
 def add_text_to_store(text: str) -> str:
     """
     Adds a given text string to the vector database for future reference.
     Use this to store important pieces of information, like the initial user prompt or key findings.
     """
-    print(f"INFO: Adding text to vector store: '{text[:50]}...'")
+    print(f"--- Running Tool: add_text_to_store ---")
+    print(f"INFO: Adding text to vector store:\n--- START OF TEXT ---\n{text}\n--- END OF TEXT ---")
     try:
         add_text_to_vector_store(text)
         return "Text successfully added to the vector store."
@@ -111,10 +141,17 @@ def query_knowledge_base(query: str) -> str:
     Queries the vector database to find information relevant to the query.
     Use this to retrieve contextually similar information that has been stored from files or text.
     """
+    print(f"--- Running Tool: query_knowledge_base ---")
     print(f"INFO: Querying knowledge base with: '{query}'")
     try:
         results = query_vector_store(query)
-        return "\n\n".join(results) if results else "No relevant information found in the knowledge base."
+        print(f"INFO: Found {len(results)} results from knowledge base.")
+        if not results:
+            return "No relevant information found in the knowledge base."
+        
+        full_results = "\n\n".join(results)
+        print(f"INFO: Knowledge base results:\n{full_results[:2000]}...")
+        return full_results
     except Exception as e:
         print(f"ERROR: Failed to query knowledge base: {e}")
         return f"Error querying knowledge base: {e}"
@@ -126,11 +163,35 @@ def analyze_image_content(file_id: str) -> str:
     Use this tool when the user provides an image to understand its content.
     The agent must be provided with the file_id to use this tool.
     """
+    print(f"--- Running Tool: analyze_image_content ---")
     print(f"INFO: Analyzing image content for file_id: {file_id}")
     try:
+        # Get file metadata
+        file_info = client.files.retrieve(file_id)
+        filename = file_info.filename.lower()
+        
+        # Check if file is an image
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+        file_ext = os.path.splitext(filename)[1]
+        if file_ext not in image_extensions:
+            return f"File {filename} is not a supported image format. Supported formats: {', '.join(image_extensions)}"
+        
+        # Map extensions to MIME types
+        mime_types = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.png': 'image/png', '.gif': 'image/gif',
+            '.bmp': 'image/bmp', '.webp': 'image/webp'
+        }
+        mime_type = mime_types.get(file_ext, 'image/jpeg')
+        
         # Retrieve the file content
         file_content_response = client.files.content(file_id)
         file_content = file_content_response.read()
+        
+        # Check file size (e.g., 20MB limit for images)
+        MAX_IMAGE_SIZE = 20 * 1024 * 1024
+        if len(file_content) > MAX_IMAGE_SIZE:
+            return f"Image file too large ({len(file_content)} bytes). Maximum supported size is {MAX_IMAGE_SIZE} bytes."
 
         # Encode the image in base64
         base64_image = base64.b64encode(file_content).decode('utf-8')
@@ -146,7 +207,7 @@ def analyze_image_content(file_id: str) -> str:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
+                                "url": f"data:{mime_type};base64,{base64_image}"
                             }
                         }
                     ]
@@ -156,7 +217,7 @@ def analyze_image_content(file_id: str) -> str:
         )
         description = response.choices[0].message.content
         if description:
-            print(f"INFO: Image analysis successful. Description length: {len(description)}")
+            print(f"INFO: Image analysis successful. Description:\n--- START OF DESCRIPTION ---\n{description}\n--- END OF DESCRIPTION ---")
             # Also add the description to the vector store
             add_text_to_vector_store(f"Image Description for {file_id}: {description}")
             return description
@@ -165,7 +226,6 @@ def analyze_image_content(file_id: str) -> str:
     except Exception as e:
         print(f"ERROR: Image analysis for file {file_id} failed: {e}")
         return f"Error analyzing image: {e}"
-
 
 available_tools = {
     "tavily_web_search": tavily_web_search,

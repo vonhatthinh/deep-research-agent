@@ -5,8 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import os
 
 # Ensure the database directory exists
-if not os.path.exists('database'):
-    os.makedirs('database')
+# (Lines 7–9 removed)
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -15,10 +14,14 @@ vector_store = []
 next_id = 0
 
 def get_embedding(text: str, model="text-embedding-3-small"):
-   """Generates an embedding for a given text."""
-   text = text.replace("\n", " ")
-   return client.embeddings.create(input=[text], model=model).data[0].embedding
-
+    """Generates an embedding for a given text."""
+    text = text.replace("\n", " ")
+    try:
+        response = client.embeddings.create(input=[text], model=model)
+        return response.data[0].embedding
+    except Exception as e:
+        print(f"ERROR: Failed to generate embedding: {e}")
+        raise
 def add_text(text: str):
     """Adds text and its embedding to the in-memory vector store."""
     global vector_store, next_id

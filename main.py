@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 # import python_multipart_form  # This is needed for Form/File to work
 
-from agent.multi_agent import run_multi_agent_research
+from agent.multi_agent import MultiAgent
 from core.config import settings
 from openai import OpenAI
 
@@ -17,12 +17,13 @@ client = OpenAI(api_key=settings.OPENAI_API_KEY)
 # Configure CORS for frontend access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to your frontend's domain
+    allow_origins=["http://localhost:3000"],  # Add your actual frontend domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+multi_agent = MultiAgent()
 
 class ConnectionManager:
     def __init__(self):
@@ -65,7 +66,7 @@ async def root():
     """Provides a welcome message and a link to the API documentation."""
     return JSONResponse(
         content={
-            "message": "how about this!",
+            "message": "this is the Deep Research Assistant API",
             "docs_url": "/docs"
         }
     )
@@ -95,13 +96,14 @@ async def query(query: str = Form(...), file: UploadFile = File(None)):
             raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
 
     # Use a streaming response to send server-sent events (SSE)
-    return StreamingResponse(
-        run_multi_agent_research(query, file_id),
-        media_type="text/event-stream"
-    )
+    # return StreamingResponse(
+    #     run_multi_agent_research(query, file_id),
+    #     media_type="text/event-stream"
+    # )
+    return multi_agent.run_multi_agent_research(query, file_id)
 
 
-app.get("/files/{file_id}", summary="Retrieve a Generated File")
+@app.get("/files/{file_id}", summary="Retrieve a Generated File")
 async def get_file(file_id: str):
     """
     Downloads a file (e.g., a generated chart) from OpenAI and returns it.
