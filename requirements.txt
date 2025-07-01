@@ -1,9 +1,11 @@
-openai
 fastapi
 uvicorn
 python-dotenv
+openai
+tavily-python
 streamlit
 requests
-tavily-python
 python-multipart
-markdown-pdf
+PyPDF2
+scikit-learn
+selenium

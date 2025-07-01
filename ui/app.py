@@ -2,6 +2,10 @@ import streamlit as st
 import requests
 import json
 import time
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 API_BASE_URL = "http://localhost:8000"
 
@@ -96,40 +100,31 @@ with col2:
         st.error(st.session_state.error)
     
     if st.session_state.report:
-        report = st.session_state.report['report']
-        
-        st.markdown(f"### Executive Summary")
-        st.markdown(report['executive_summary'])
+        report = st.session_state.report
+        st.json(report) # Display the raw JSON for now
 
-        st.markdown(f"### Key Findings")
-        for finding in report['key_findings']:
-            st.markdown(f"- {finding}")
-        
-        if report.get('visuals'):
-            st.markdown("### Visuals")
-            for file_id in report['visuals']:
-                image_url = f"{API_BASE_URL}/files/{file_id}"
-                st.image(image_url, caption=f"Generated Visual (ID: {file_id})")
-
-        st.markdown(f"### Conclusion")
-        st.markdown(report['conclusion'])
-        
-        st.markdown(f"### References")
-        for ref in report['references']:
-            st.markdown(f"- {ref}")
-            
-        # Add a download button for the report
-        # (For simplicity, we download the raw JSON. Could be enhanced to generate PDF)
-        report_json = json.dumps(st.session_state.report, indent=2)
+        # Prepare report for download
+        report_str = json.dumps(report, indent=2)
         st.download_button(
-            label="Download Full Report (JSON)",
-            data=report_json,
+            label="Download Report",
+            data=report_str,
             file_name="research_report.json",
             mime="application/json"
         )
+
     else:
         st.info("The final research report will be displayed here.")
 
 if debug_mode:
-    with st.expander("Debug Information"):
-        st.write(st.session_state)
+    if os.getenv('STREAMLIT_ENV') == 'development':
+        with st.expander("Debug Information"):
+            # Only display safe debugging information
+            debug_info = {
+                'thinking_process_count': len(st.session_state.get('thinking_process', [])),
+                'report_available': st.session_state.get('report') is not None,
+                'error_present': st.session_state.get('error') is not None,
+                'session_keys': list(st.session_state.keys())
+            }
+            st.write(debug_info)
+    else:
+        st.warning("Debug mode is only available in development environment.")
