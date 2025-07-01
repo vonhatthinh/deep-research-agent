@@ -1,0 +1,16 @@
+# Use an appropriate base image
+FROM python:3.9-slim
+
+RUN apt-get update -y
+RUN pip install -U pip setuptools 
+ENV PIP_ROOT_USER_ACTION=ignore
+# Install your Python dependencies including Playwright
+COPY requirements.txt .
+RUN pip install --upgrade pip
+RUN pip3 install -r requirements.txt
+
+# Copy your application code
+COPY . /app
+WORKDIR /app
+
+CMD ["python", "main.py"]

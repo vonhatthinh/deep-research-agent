@@ -1,0 +1,9 @@
+openai
+fastapi
+uvicorn
+python-dotenv
+streamlit
+requests
+tavily-python
+python-multipart
+markdown-pdf
