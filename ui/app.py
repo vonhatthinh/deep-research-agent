@@ -18,6 +18,7 @@ with st.sidebar:
     query = st.text_area("Enter your research query:", height=150)
     uploaded_file = st.file_uploader("Upload a document (optional)", type=['pdf', 'docx', 'csv', 'txt'])
     start_button = st.button("Start Research")
+    debug_mode = st.checkbox("Enable debug mode")
 
 
 # --- State Management ---
@@ -128,3 +129,7 @@ with col2:
         )
     else:
         st.info("The final research report will be displayed here.")
+
+if debug_mode:
+    with st.expander("Debug Information"):
+        st.write(st.session_state)
