@@ -96,11 +96,10 @@ async def query(query: str = Form(...), file: UploadFile = File(None)):
             raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
 
     # Use a streaming response to send server-sent events (SSE)
-    # return StreamingResponse(
-    #     run_multi_agent_research(query, file_id),
-    #     media_type="text/event-stream"
-    # )
-    return multi_agent.run_multi_agent_research(query, file_id)
+    return StreamingResponse(
+        multi_agent.run_multi_agent_research(query, file_id),
+        media_type="text/event-stream"
+    )
 
 
 @app.get("/files/{file_id}", summary="Retrieve a Generated File")

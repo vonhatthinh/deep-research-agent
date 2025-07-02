@@ -9,6 +9,7 @@ from core.config import settings
 from agent.tools import tools_schema, available_tools
 from database.vector_store import clear_store
 from agent.base_agent import BaseAgent
+from agents import Agent, Runner
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -28,7 +29,7 @@ class MultiAgent(BaseAgent):
 
     async def run_agent(self, assistant_id: str, user_input: str, file_id: Optional[str] = None) -> str:
         thread = client.beta.threads.create()
-
+        print(f"User input: {user_input}")
         attachments = []
         if file_id:
             attachments.append({"file_id": file_id, "tools": [{"type": "file_search"}, {"type": "code_interpreter"}]})
@@ -88,8 +89,15 @@ class MultiAgent(BaseAgent):
             if function_to_call:
                 try:
                     function_args = json.loads(tool_call.function.arguments)
-                    if function_name in ["process_and_store_file", "analyze_image_content"] and 'file_id' not in function_args:
-                        function_args['file_id'] = file_id
+                    # Pass file_id to tools that might need it, even if not explicitly in args
+                    if function_name in ["process_and_store_file", "analyze_image_content", "add_text_to_store"] and 'file_id' not in function_args:
+                         if file_id:
+                            function_args['file_id'] = file_id
+                         # If file_id is required by the tool but not available, skip the tool call or handle appropriately
+                         elif function_name in ["process_and_store_file", "analyze_image_content"]:
+                             print(f"Skipping tool call {function_name}: file_id is required but not provided.")
+                             tool_outputs.append({"tool_call_id": tool_call.id, "output": f"Error: Tool '{function_name}' requires a file, but no file was uploaded."})
+                             continue # Skip to the next tool call
 
                     if asyncio.iscoroutinefunction(function_to_call):
                         output = await function_to_call(**function_args)
@@ -118,55 +126,60 @@ class MultiAgent(BaseAgent):
             params["response_format"] = response_format
         return client.beta.assistants.create(**params)
 
-    async def run_multi_agent_research(self, query: str, file_id: Optional[str] = None) -> AsyncGenerator[str, None]:
-        """
-        Runs the multi-agent research process and streams back the results.
-        """
-        # Clear the vector store at the beginning of each research task
-        clear_store()
-
-        yield "event: thinking\ndata: Starting multi-agent research process...\n\n"
-
-        # Agent 1: Query Analyzer
-        yield "event: thinking\ndata: Agent 1/5: Analyzing query...\n\n"
+    async def _run_analyzer_agent(self, query: str, file_id: Optional[str]) -> dict:
+        """Runs the query analyzer agent to determine intent and analyze the query."""
         analyzer_assistant = self._create_assistant(
             name="Query Analyzer Agent",
-            instructions="You are an expert at analyzing and interpreting user queries. Your goal is to understand the user's intent, identify key entities, and clarify any ambiguities. Provide a clear and concise interpretation of the query.",
-        )
-        analyzed_query = await self.run_agent(analyzer_assistant.id, query, file_id)
-        print(f"Analyzed Query: {analyzed_query}")
-        yield f"event: thinking\ndata: {json.dumps({'agent': 'Query Analyzer', 'response': analyzed_query})}\n\n"
-
-        # Agent 2: Task Planner
-        yield "event: thinking\ndata: Agent 2/5: Planning tasks...\n\n"
-        planner_assistant = self._create_assistant(
-            name="Task Planner Agent",
-            instructions="You are a meticulous planner. Your first step is always to store the original user query in the vector database using the `add_text_to_store` tool. If a file is provided, your second step is to process it using either `process_and_store_file` for documents or `analyze_image_content` for images. After that, create a plan to query the knowledge base and the web to answer the user's request. Output a JSON object with a list of tasks.",
+            instructions="You are an expert at analyzing user input. Determine if the user's request is a simple chat message or requires in-depth research, potentially involving file analysis if a file is attached. Respond with a JSON object containing the 'intent' ('chat' or 'research') and the 'analyzed_query'.",
             response_format={"type": "json_object"}
         )
-        planner_input = f"Original User Query: {query}"
+        analyzed_query_json = await self.run_agent(analyzer_assistant.id, query, file_id)
+        print(f"Analyzed Query JSON: {analyzed_query_json}")
+        try:
+            return json.loads(analyzed_query_json)
+        except json.JSONDecodeError:
+            print(f"Warning: Query Analyzer returned invalid JSON: {analyzed_query_json}")
+            return {"intent": "research", "analyzed_query": query, "error": "Invalid JSON response"}
+
+    async def _run_chat_agent(self, query: str) -> str:
+        """Runs the chat agent for simple queries."""
+        chat_assistant = self._create_assistant(
+            name="Chat Agent",
+            instructions="You are a helpful and friendly chatbot. Respond to the user's query directly.",
+        )
+        return await self.run_agent(chat_assistant.id, query)
+
+    async def _run_planner_agent(self, query: str, analyzed_query_text: str, file_id: Optional[str]) -> str:
+        """Runs the task planner agent to create a research plan."""
+        planner_instructions = "You are a meticulous planner. Your first step is always to store the original user query in the vector database using the `add_text_to_store` tool."
+        if file_id:
+            planner_instructions += " If a file is provided, your second step is to process it using either `process_and_store_file` for documents or `analyze_image_content` for images."
+        planner_instructions += " After that, create a plan to query the knowledge base and the web to answer the user's request. Output a JSON object with a list of tasks."
+
+        planner_assistant = self._create_assistant(
+            name="Task Planner Agent",
+            instructions=planner_instructions,
+            response_format={"type": "json_object"},
+            tools=[typing.cast(AssistantToolParam, tool) for tool in tools_schema if tool['function']['name'] in ['add_text_to_store', 'process_and_store_file', 'analyze_image_content']]
+        )
+        planner_input = f"Original User Query: {query}\nAnalyzed Query: {analyzed_query_text}"
         if file_id:
             planner_input += f"\nFile ID: {file_id}"
         task_list_json = await self.run_agent(planner_assistant.id, planner_input, file_id)
         print(f"Task List JSON: {task_list_json}")
-        try:
-            task_list_obj = json.loads(task_list_json)
-            yield f"event: thinking\ndata: {json.dumps({'agent': 'Task Planner', 'response': task_list_obj})}\n\n"
-        except json.JSONDecodeError:
-            print(f"Warning: Task Planner returned invalid JSON: {task_list_json}")
-            yield f"event: thinking\ndata: {json.dumps({'agent': 'Task Planner', 'error': 'Invalid JSON response', 'raw_response': task_list_json})}\n\n"
-        # Agent 3: Researcher
-        yield "event: thinking\ndata: Agent 3/5: Researching based on tasks...\n\n"
+        return task_list_json
+
+    async def _run_researcher_agent(self, task_list_json: str, file_id: Optional[str]) -> str:
+        """Runs the researcher agent to execute tasks and gather information."""
         researcher_assistant = self._create_assistant(
             name="Researcher Agent",
             instructions="You are a diligent researcher. Execute the given list of tasks to gather information. Use the available tools to find relevant data. Synthesize the findings into a comprehensive research report.",
             tools=[typing.cast(AssistantToolParam, tool) for tool in tools_schema]
         )
-        research_report = await self.run_agent(researcher_assistant.id, f"Research tasks: {task_list_json}", file_id)
-        yield f"event: thinking\ndata: {json.dumps({'agent': 'Researcher', 'response': research_report})}\n\n"
+        return await self.run_agent(researcher_assistant.id, f"Research tasks: {task_list_json}", file_id)
 
-        # Agent 4: Visualizer
-        yield "event: thinking\ndata: Agent 4/5: Generating visuals...\n\n"
+    async def _run_visualizer_agent(self, research_report: str, file_id: Optional[str]) -> str:
+        """Runs the visualizer agent to generate visuals for the report."""
         visualizer_assistant = self._create_assistant(
             name="Visualizer Agent",
             instructions="You are a data visualization expert. Review the research report and determine if any charts, graphs, or diagrams would enhance it. If so, use the code interpreter to generate them and provide their file IDs. Otherwise, state that no visuals are needed.",
@@ -174,34 +187,86 @@ class MultiAgent(BaseAgent):
         )
         visuals_summary = await self.run_agent(visualizer_assistant.id, research_report, file_id)
         print(f"Visuals Summary: {visuals_summary}")
-        yield f"event: thinking\ndata: {json.dumps({'agent': 'Visualizer', 'response': visuals_summary})}\n\n"
+        return visuals_summary
 
-        # Agent 5: Evaluator
-        yield "event: thinking\ndata: Agent 5/5: Evaluating final report...\n\n"
+    async def _run_evaluator_agent(self, research_report: str, visuals_summary: str, file_id: Optional[str]) -> str:
+        """Runs the evaluator agent to assess the final report."""
         evaluator_assistant = self._create_assistant(
             name="Evaluator Agent",
             instructions="You are a critical evaluator. Assess the final research report for completeness, accuracy, and objectivity. Provide a final evaluation and suggest any areas for improvement.",
         )
         final_evaluation = await self.run_agent(evaluator_assistant.id, f"Report: {research_report}\n\nVisuals Summary: {visuals_summary}", file_id)
         print(f"Final Evaluation: {final_evaluation}")
-        yield f"event: thinking\ndata: {json.dumps({'agent': 'Evaluator', 'response': final_evaluation})}\n\n"
+        return final_evaluation
 
-        # Combine results into a final report
-        try:
-            tasks = json.loads(task_list_json)
-        except json.JSONDecodeError:
-            tasks = task_list_json
+    async def run_multi_agent_research(self, query: str, file_id: Optional[str] = None) -> AsyncGenerator[str, None]:
+        """
+        Runs the multi-agent research process and streams back the results.
+        """
+        clear_store()
+        yield "event: thinking\ndata: Starting process...\n\n"
+
+        # Agent 1: Query Analyzer
+        yield "event: thinking\ndata: Agent 1/?: Analyzing query and determining intent...\n\n"
+        analyzed_query_obj = await self._run_analyzer_agent(query, file_id)
+        intent = analyzed_query_obj.get("intent", "research")
+        analyzed_query_text = analyzed_query_obj.get("analyzed_query", query)
+        yield f"event: thinking\ndata: {json.dumps({'agent': 'Query Analyzer', 'response': analyzed_query_obj})}\n\n"
+
+        if intent == "chat" and not file_id:
+            yield "event: thinking\ndata: Intent classified as chat. Responding directly.\n\n"
+            chat_response = await self._run_chat_agent(query)
+            yield f"event: report\ndata: {json.dumps({'response': chat_response})}\n\n"
+            final_report_data = {
+                "analyzed_query": analyzed_query_text,
+                "task_list": None,
+                "research_report": None,
+                "visuals_summary": None,
+                "final_evaluation": None,
+                "chat_response": chat_response
+            }
+        else:
+            yield "event: thinking\ndata: Intent classified as research or file processing. Starting research pipeline.\n\n"
             
-        final_report_data = {
-            "analyzed_query": analyzed_query,
-            "task_list": tasks,
-            "research_report": research_report,
-            "visuals_summary": visuals_summary,
-            "final_evaluation": final_evaluation
-        }
-        yield f"event: report\ndata: {json.dumps(final_report_data, indent=2)}\n\n"
+            # Agent 2: Task Planner
+            yield "event: thinking\ndata: Agent 2/5: Planning tasks...\n\n"
+            task_list_json = await self._run_planner_agent(query, analyzed_query_text, file_id)
+            try:
+                task_list_obj = json.loads(task_list_json)
+                yield f"event: thinking\ndata: {json.dumps({'agent': 'Task Planner', 'response': task_list_obj})}\n\n"
+            except json.JSONDecodeError:
+                yield f"event: thinking\ndata: {json.dumps({'agent': 'Task Planner', 'error': 'Invalid JSON response', 'raw_response': task_list_json})}\n\n"
+                task_list_json = json.dumps({"tasks": ["Could not parse planner output."]})
 
-        yield "event: end\ndata: Multi-agent research process complete.\n\n"
+            # Agent 3: Researcher
+            yield "event: thinking\ndata: Agent 3/5: Researching based on tasks...\n\n"
+            research_report = await self._run_researcher_agent(task_list_json, file_id)
+            yield f"event: thinking\ndata: {json.dumps({'agent': 'Researcher', 'response': research_report})}\n\n"
+
+            # Agent 4: Visualizer
+            yield "event: thinking\ndata: Agent 4/5: Generating visuals...\n\n"
+            visuals_summary = await self._run_visualizer_agent(research_report, file_id)
+            yield f"event: thinking\ndata: {json.dumps({'agent': 'Visualizer', 'response': visuals_summary})}\n\n"
+
+            # Agent 5: Evaluator
+            yield "event: thinking\ndata: Agent 5/5: Evaluating final report...\n\n"
+            final_evaluation = await self._run_evaluator_agent(research_report, visuals_summary, file_id)
+            yield f"event: thinking\ndata: {json.dumps({'agent': 'Evaluator', 'response': final_evaluation})}\n\n"
+
+            # Combine results into a final report
+            try:
+                tasks = json.loads(task_list_json)
+            except json.JSONDecodeError:
+                tasks = task_list_json
+                
+            final_report_data = {
+                "analyzed_query": analyzed_query_text,
+                "task_list": tasks,
+                "research_report": research_report,
+                "visuals_summary": visuals_summary,
+                "final_evaluation": final_evaluation
+            }
+            yield f"event: report\ndata: {json.dumps(final_report_data, indent=2)}\n\n"
+        print(final_report_data)
+        yield "event: end\ndata: Process complete.\n\n"
         return
-
-
