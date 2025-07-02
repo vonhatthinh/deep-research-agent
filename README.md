@@ -2,13 +2,9 @@
 
 This project implements a multimodal Deep Research Agent capable of handling user queries with text, image, or file inputs, conducting deep web research, generating visual outputs, and compiling comprehensive reports. The solution is designed with a modular architecture, leveraging FastAPI for the backend, LangChain for the agentic research pipeline, and Streamlit for an interactive user interface.
 
-## Architecture
-
-![Architecture Diagram](./architecture_diagram.png)
-
 ## Workflow
 
-![Workflow Diagram](./workflow_diagram.png)
+![Workflow Diagram](./resources/workflow_diagram.png)
 
 ## Features
 
