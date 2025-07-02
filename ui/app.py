@@ -56,12 +56,13 @@ def create_pdf_report(report_data):
         pdf.set_font("Arial", '', 12)
         
         if isinstance(content, str):
-            pdf.multi_cell(0, 10, content)
+            # Encode to latin-1 to handle special characters for FPDF
+            pdf.multi_cell(0, 10, content.encode('latin-1', 'replace').decode('latin-1'))
         elif isinstance(content, list):
             for item in content:
                 if isinstance(item, dict): # For visuals
-                    item_title = item.get('title', 'N/A')
-                    item_desc = item.get('description', 'No description.')
+                    item_title = item.get('title', 'N/A').encode('latin-1', 'replace').decode('latin-1')
+                    item_desc = item.get('description', 'No description.').encode('latin-1', 'replace').decode('latin-1')
                     item_id = item.get('file_id', 'N/A')
                     pdf.set_font("Arial", 'I', 12)
                     pdf.multi_cell(0, 10, f"- {item_title}:")
@@ -69,7 +70,7 @@ def create_pdf_report(report_data):
                     pdf.multi_cell(0, 10, f"  Description: {item_desc}")
                     pdf.multi_cell(0, 10, f"  File ID: {item_id}")
                 else: # For key findings, references
-                    pdf.multi_cell(0, 10, f"- {item}")
+                    pdf.multi_cell(0, 10, f"- {str(item)}".encode('latin-1', 'replace').decode('latin-1'))
                 pdf.ln(2)
         pdf.ln(5)
 
@@ -83,7 +84,7 @@ def create_pdf_report(report_data):
     if "raw_evaluator_output" in report_data:
         write_section("Raw Evaluator Output (Error)", report_data.get("raw_evaluator_output"))
 
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('latin-1')  # Return PDF as bytes
 
 
 def start_research_task(query, uploaded_files):
@@ -122,8 +123,14 @@ def start_research_task(query, uploaded_files):
                         elif event_type == 'report':
                             try:
                                 report_data = json.loads(full_data)
-                                st.session_state.messages.append({'role': 'assistant', 'content': "Here is the final research report:", 'type': 'report_intro'})
-                                st.session_state.messages.append({'role': 'assistant', 'content': report_data, 'type': 'report_json'})
+                                # Check if it's a simple chat response or a full report
+                                if 'response' in report_data and len(report_data) == 1:
+                                    # This is a chat response
+                                    st.session_state.messages.append({'role': 'assistant', 'content': report_data['response']})
+                                else:
+                                    # This is a full research report
+                                    st.session_state.messages.append({'role': 'assistant', 'content': "Here is the final research report:", 'type': 'report_intro'})
+                                    st.session_state.messages.append({'role': 'assistant', 'content': report_data, 'type': 'report_json'})
                             except json.JSONDecodeError:
                                 error_message = f"Failed to decode report JSON: {full_data}"
                                 st.session_state.messages.append({'role': 'assistant', 'content': error_message, 'type': 'error'})
@@ -145,15 +152,52 @@ def start_research_task(query, uploaded_files):
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if message.get('type') == 'report_json':
-            st.json(message["content"])
+            report_data = message["content"]
+            
+            st.header("Final Research Report")
+
+            if report_data.get("executive_summary"):
+                st.subheader("Executive Summary")
+                st.markdown(report_data["executive_summary"])
+
+            if report_data.get("key_findings"):
+                st.subheader("Key Findings")
+                for finding in report_data["key_findings"]:
+                    st.markdown(f"- {finding}")
+
+            if report_data.get("visuals"):
+                st.subheader("Visuals")
+                for visual in report_data["visuals"]:
+                    st.markdown(f"**{visual.get('title', 'Visual')}**")
+                    st.markdown(visual.get('description', ''))
+                    if visual.get("file_id"):
+                        try:
+                            image_url = f"{API_BASE_URL}/files/{visual['file_id']}"
+                            response = requests.get(image_url)
+                            if response.status_code == 200:
+                                st.image(response.content)
+                            else:
+                                st.warning(f"Could not load image for file_id: {visual['file_id']}")
+                        except Exception as e:
+                            st.error(f"Error loading image: {e}")
+            
+            if report_data.get("conclusion"):
+                st.subheader("Conclusion")
+                st.markdown(report_data["conclusion"])
+
+            if report_data.get("references"):
+                st.subheader("References")
+                for ref in report_data["references"]:
+                    st.markdown(f"- {ref}")
+
             # Add download button for the report
-            pdf_report = create_pdf_report(message["content"])
+            pdf_report = create_pdf_report(report_data)
             st.download_button(
                 label="Download Report as PDF",
-                data=pdf_report,  # Read the PDF content
+                data=pdf_report,
                 file_name="research_report.pdf",
                 mime="application/pdf",
-                key=f"download_{id(message)}" # Use a unique key
+                key=f"download_{id(message)}"
             )
         elif message.get('type') == 'thinking':
              st.info(message["content"])
