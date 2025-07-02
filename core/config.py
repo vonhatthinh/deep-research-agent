@@ -7,6 +7,7 @@ load_dotenv()
 class Settings():
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     TAVILY_API_KEY: Optional[str] = os.getenv("TAVILY_API_KEY")
+    GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
     ASSISTANT_ID: Optional[str] = None
 
     # Allow extra fields, e.g., from environment variables that are not part of the model

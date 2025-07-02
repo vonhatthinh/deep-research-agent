@@ -1,5 +1,7 @@
 import os
 import base64
+import io
+import requests
 from tavily import TavilyClient
 from core.config import settings
 from openai import OpenAI
@@ -14,24 +16,59 @@ tavily_client = TavilyClient(api_key=settings.TAVILY_API_KEY)
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-def tavily_web_search(query: str) -> str:
+def tavily_web_search(query: str, include_images: bool = False) -> dict:
     """
     Performs a web search using the Tavily API.
     This function is designed to be called by the OpenAI Assistant.
+    If include_images is true, it will also fetch and upload the first image from the results.
     """
     print(f"--- Running Tool: tavily_web_search ---")
     print(f"INFO: Performing Tavily search for query: {query}")
     try:
-        result = tavily_client.search(query, search_depth="advanced", max_results=5)
-        # Format the results into a concise string for the LLM
+        # Perform the search
+        result = tavily_client.search(query, search_depth="advanced", max_results=5, include_images=include_images)
+        
+        # Format the text results
         formatted_results = "\n\n".join(
             [f"Source: {res['url']}\nContent: {res['content']}" for res in result['results']]
         )
         print(f"INFO: Tavily search results:\n{formatted_results}...")
-        return formatted_results
+
+        image_file_id = None
+        if include_images and result.get('images'):
+            first_image_url = result['images'][0]
+            print(f"INFO: Found image to download: {first_image_url}")
+            
+            try:
+                # Download the image
+                image_response = requests.get(first_image_url)
+                image_response.raise_for_status()
+                image_bytes = image_response.content
+
+                # Upload the image to OpenAI files
+                file_stream = io.BytesIO(image_bytes)
+                file_stream.name = "web_search_image.png"
+                
+                openai_file = client.files.create(
+                    file=file_stream,
+                    purpose='assistants'
+                )
+                image_file_id = openai_file.id
+                print(f"INFO: Successfully uploaded image from web search. File ID: {image_file_id}")
+
+            except Exception as e:
+                print(f"ERROR: Failed to download or upload image: {e}")
+                # Don't let image failure stop the text results from returning
+                pass
+
+        return {
+            "search_results": formatted_results,
+            "image_file_id": image_file_id
+        }
+
     except Exception as e:
         print(f"ERROR: Tavily search failed: {e}")
-        return f"Error performing web search: {e}"
+        return {"error": f"Error performing web search: {e}"}
 
 
 def process_and_store_file(file_id: str) -> str:
@@ -197,6 +234,11 @@ tools_schema = [
                     "query": {
                         "type": "string",
                         "description": "The search query to find information on the web."
+                    },
+                    "include_images": {
+                        "type": "boolean",
+                        "description": "Set to true to include the first image from the search results in the output.",
+                        "default": False
                     }
                 },
                 "required": ["query"]
