@@ -8,7 +8,7 @@ This project implements a multimodal Deep Research Agent capable of handling use
 
 ## Workflow
 
-![Workflow Diagram](./workflow_diagram.png)
+![Workflow Diagram](.resources/workflow_diagram.png)
 
 ## Features
 
