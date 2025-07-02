@@ -27,76 +27,23 @@ def tavily_web_search(query: str) -> str:
         formatted_results = "\n\n".join(
             [f"Source: {res['url']}\nContent: {res['content']}" for res in result['results']]
         )
-        print(f"INFO: Tavily search results:\n{formatted_results[:2000]}...")
+        print(f"INFO: Tavily search results:\n{formatted_results}...")
         return formatted_results
     except Exception as e:
         print(f"ERROR: Tavily search failed: {e}")
         return f"Error performing web search: {e}"
 
 
-def selenium_get_web_content(url: str) -> str:
-    """
-    Uses Selenium to fetch the main content of a web page from the given URL.
-    This function is designed to be called by the OpenAI Assistant.
-    """
-    print(f"--- Running Tool: selenium_get_web_content ---")
-    print(f"INFO: Fetching web content via Selenium for URL: {url}")
-    driver = None
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        import time
-
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(30)  # 30 second timeout
-        driver.get(url)
-
-        # Wait until the <body> element is present (up to 10 seconds)
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, 'body'))
-        )
-        # Extract the main content from the body
-        body = driver.find_element(By.TAG_NAME, 'body')
-        content = body.text
-        print(f"INFO: Extracted content from {url}:\n--- START OF CONTENT ---\n{content[:2000]}...\n--- END OF CONTENT ---")
-        return content if content else "No content found on the page."
-    except Exception as e:
-        print(f"ERROR: Failed to fetch web content: {e}")
-        return f"Error fetching web content: {e}"
-    finally:
-        if driver:
-            driver.quit()
-
-
 def process_and_store_file(file_id: str) -> str:
-    """
-    Processes a file (PDF or text), extracts its content, and stores it in the vector database.
-    Use this tool to make the content of a file available for semantic search.
-    """
-    print(f"--- Running Tool: process_and_store_file ---")
-    print(f"INFO: Processing file for vector storage: {file_id}")
     try:
-        # Get file metadata first
         file_info = client.files.retrieve(file_id)
         filename = file_info.filename.lower()
         file_size = file_info.bytes if hasattr(file_info, 'bytes') else None
-
-        # Check file size limit (e.g., 50MB)
         MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
         if file_size and file_size > MAX_FILE_SIZE:
             return f"File too large ({file_size} bytes). Maximum supported size is {MAX_FILE_SIZE} bytes."
-
         file_content_response = client.files.content(file_id)
         file_content = file_content_response.read()
-
         text_content = ""
         if filename.endswith('.pdf'):
             try:
@@ -120,6 +67,7 @@ def process_and_store_file(file_id: str) -> str:
     except Exception as e:
         print(f"ERROR: Failed to process file {file_id}: {e}")
         return f"Error processing file: {e}"
+
 
 def add_text_to_store(text: str) -> str:
     """
@@ -198,7 +146,7 @@ def analyze_image_content(file_id: str) -> str:
 
         # Call Chat Completions API with the image
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="o3-mini",
             messages=[
                 {
                     "role": "user",
@@ -227,9 +175,9 @@ def analyze_image_content(file_id: str) -> str:
         print(f"ERROR: Image analysis for file {file_id} failed: {e}")
         return f"Error analyzing image: {e}"
 
+
 available_tools = {
     "tavily_web_search": tavily_web_search,
-    "selenium_get_web_content": selenium_get_web_content,
     "process_and_store_file": process_and_store_file,
     "add_text_to_store": add_text_to_store,
     "query_knowledge_base": query_knowledge_base,
@@ -252,57 +200,6 @@ tools_schema = [
                     }
                 },
                 "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "selenium_get_web_content",
-            "description": "Fetch the main content of a web page using Selenium. Use this for pages that require JavaScript rendering or dynamic content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "The URL of the web page to fetch content from."
-                    }
-                },
-                "required": ["url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "process_and_store_file",
-            "description": "Processes a file (PDF or text) and stores its content in the vector database for semantic search.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_id": {
-                        "type": "string",
-                        "description": "The ID of the file to process and store."
-                    }
-                },
-                "required": ["file_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_text_to_store",
-            "description": "Adds a given text string to the vector database for future reference.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": {
-                        "type": "string",
-                        "description": "The text to add to the vector store."
-                    }
-                },
-                "required": ["text"]
             }
         }
     },

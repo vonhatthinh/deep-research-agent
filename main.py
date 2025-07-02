@@ -82,22 +82,27 @@ async def status():
 
 
 @app.post("/query", summary="Start a Research Task")
-async def query(query: str = Form(...), file: UploadFile = File(None)):
+async def query(query: str = Form(...), files: list[UploadFile] = File(None), session_id: str = Form(...)):
     """
-    Accepts a user query and an optional file, then streams the agent's research process.
+    Accepts a user query, optional files, and a session_id, then streams the agent's research process.
     """
-    file_id = None
-    if file:
-        try:
-            # Upload the file to OpenAI's servers for the assistant to use
-            uploaded_file = client.files.create(file=file.file, purpose='assistants')
-            file_id = uploaded_file.id
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
+    file_ids = []
+    if files:
+        for file in files:
+            try:
+                # Upload the file to OpenAI's servers for the assistant to use
+                uploaded_file = client.files.create(file=file.file, purpose='assistants')
+                file_ids.append(uploaded_file.id)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to upload file: {e}")
+
+    # For now, we'll pass the first file_id to the agent.
+    # TODO: Update multi_agent to handle multiple file_ids
+    file_id = file_ids[0] if file_ids else None
 
     # Use a streaming response to send server-sent events (SSE)
     return StreamingResponse(
-        multi_agent.run_multi_agent_research(query, file_id),
+        multi_agent.run_multi_agent_research(query=query, file_id=file_id, session_id=session_id),
         media_type="text/event-stream"
     )
 
