@@ -4,11 +4,11 @@ This project implements a multimodal Deep Research Agent capable of handling use
 
 ## Architecture
 
-![Architecture Diagram](./architecture_diagram.png)
+![Architecture Diagram](./resources/architecture_diagram.png)
 
 ## Workflow
 
-![Workflow Diagram](.resources/workflow_diagram.png)
+![Workflow Diagram](./resources/workflow_diagram.png)
 
 ## Features
 
