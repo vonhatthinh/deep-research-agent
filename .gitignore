@@ -153,7 +153,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
-
+/ui/public/*
 # mypy
 .mypy_cache/
 .dmypy.json

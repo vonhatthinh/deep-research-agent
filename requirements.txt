@@ -10,3 +10,8 @@ PyPDF2
 scikit-learn
 selenium
 fpdf2
+openai-agents
+google-genai
+docx2txt
+pypdf
+fpdf

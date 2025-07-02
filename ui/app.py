@@ -25,17 +25,15 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
-# Remove old state variables
-if 'thinking_process' in st.session_state:
-    del st.session_state.thinking_process
-if 'report' in st.session_state:
-    del st.session_state.report
-if 'error' in st.session_state:
-    del st.session_state.error
-if 'user_query' in st.session_state:
-    del st.session_state.user_query
 
+# --- File serving setup ---
+# This is a workaround for Streamlit's lack of direct file serving.
+# In a production environment, a proper web server (like Nginx) should handle this.
+PUBLIC_DIR = os.path.join(os.path.dirname(__file__), "public")
+if not os.path.exists(PUBLIC_DIR):
+    os.makedirs(PUBLIC_DIR)
 
+# --- PDF Generation ---
 def create_pdf_report(report_data):
     """Generates a PDF report from the structured research data."""
     pdf = FPDF()
@@ -43,7 +41,7 @@ def create_pdf_report(report_data):
     pdf.set_auto_page_break(auto=True, margin=15)
 
     # Title
-    pdf.set_font("Arial", 'B', 16)
+    pdf.set_font("Helvetica", 'B', 16)
     pdf.cell(0, 10, "Deep Research Report", ln=True, align='C')
     pdf.ln(10)
 
@@ -51,31 +49,69 @@ def create_pdf_report(report_data):
     def write_section(title, content):
         if not content:  # Don't write empty sections
             return
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, title, ln=True, align='L')
-        pdf.set_font("Arial", '', 12)
-        
-        if isinstance(content, str):
-            # Encode to latin-1 to handle special characters for FPDF
-            pdf.multi_cell(0, 10, content.encode('latin-1', 'replace').decode('latin-1'))
-        elif isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict): # For visuals
-                    item_title = item.get('title', 'N/A').encode('latin-1', 'replace').decode('latin-1')
-                    item_desc = item.get('description', 'No description.').encode('latin-1', 'replace').decode('latin-1')
-                    item_id = item.get('file_id', 'N/A')
-                    pdf.set_font("Arial", 'I', 12)
-                    pdf.multi_cell(0, 10, f"- {item_title}:")
-                    pdf.set_font("Arial", '', 12)
-                    pdf.multi_cell(0, 10, f"  Description: {item_desc}")
-                    pdf.multi_cell(0, 10, f"  File ID: {item_id}")
-                else: # For key findings, references
-                    pdf.multi_cell(0, 10, f"- {str(item)}".encode('latin-1', 'replace').decode('latin-1'))
-                pdf.ln(2)
-        pdf.ln(5)
+        try:
+            pdf.set_font("Helvetica", 'B', 14)
+            pdf.cell(0, 10, title, ln=True, align='L')
+            pdf.set_font("Helvetica", '', 12)
+            
+            if isinstance(content, str):
+                # Handle simple markdown (### headers and lists)
+                # Encode the whole content once to handle special characters for FPDF
+                safe_content = content.encode('latin-1', 'replace').decode('latin-1')
+                lines = safe_content.split('\n')
+                for line in lines:
+                    stripped_line = line.strip()
+                    if stripped_line.startswith("### "):
+                        pdf.set_font("Helvetica", 'B', 13)
+                        pdf.multi_cell(0, 8, stripped_line.replace("### ", ""))
+                        pdf.set_font("Helvetica", '', 12)
+                    elif stripped_line.startswith("- "):
+                        pdf.multi_cell(0, 8, f"  {stripped_line}")
+                    else:
+                        pdf.multi_cell(0, 8, stripped_line)
+                pdf.ln(2) # Add a little space after a block of text
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict): # For visuals
+                        item_title = item.get('title', 'N/A').encode('latin-1', 'replace').decode('latin-1')
+                        item_desc = item.get('description', 'No description.').encode('latin-1', 'replace').decode('latin-1')
+                        item_id = item.get('file_id', 'N/A') # This will be a URL path
+                        pdf.set_font("Helvetica", 'I', 12)
+                        pdf.multi_cell(0, 10, f"- {item_title}:")
+                        pdf.set_font("Helvetica", '', 12)
+                        pdf.multi_cell(0, 10, f"  Description: {item_desc}")
+                        # Try to embed image if it's a supported format and accessible
+                        if item_id and (str(item_id).lower().endswith(('.png', '.jpg', '.jpeg')) or str(item_id).lower().endswith(('.gif', '.bmp'))):
+                            try:
+                                # Download the image from the API endpoint
+                                import requests
+                                image_url = f"{API_BASE_URL}{item_id}"
+                                response = requests.get(image_url)
+                                if response.status_code == 200:
+                                    from tempfile import NamedTemporaryFile
+                                    with NamedTemporaryFile(delete=False, suffix=os.path.splitext(item_id)[-1]) as tmp_img:
+                                        tmp_img.write(response.content)
+                                        tmp_img.flush()
+                                        pdf.image(tmp_img.name, w=100)  # width in mm
+                                    os.unlink(tmp_img.name)
+                                else:
+                                    pdf.multi_cell(0, 10, f"  [Image could not be loaded: {image_url}]")
+                            except Exception as e:
+                                pdf.multi_cell(0, 10, f"  [Error embedding image: {e}]")
+                        else:
+                            # If not embeddable, just show the public URL
+                            pdf.multi_cell(0, 10, f"  Image URL: {API_BASE_URL}{item_id}")
+                    else: # For key findings, references
+                        pdf.multi_cell(0, 10, f"- {str(item)}".encode('latin-1', 'replace').decode('latin-1'))
+                    pdf.ln(2)
+            pdf.ln(5)
+        except Exception as e:
+            pdf.set_font("Helvetica", 'B', 12)
+            pdf.multi_cell(0, 10, f"Error rendering section '{title}': {e}")
 
     # Write content based on the new structure
     write_section("Executive Summary", report_data.get("executive_summary"))
+    write_section("Detailed Report", report_data.get("detailed_report"))
     write_section("Key Findings", report_data.get("key_findings"))
     write_section("Visuals", report_data.get("visuals"))
     write_section("Conclusion", report_data.get("conclusion"))
@@ -84,14 +120,13 @@ def create_pdf_report(report_data):
     if "raw_evaluator_output" in report_data:
         write_section("Raw Evaluator Output (Error)", report_data.get("raw_evaluator_output"))
 
-    return pdf.output(dest='S').encode('latin-1')  # Return PDF as bytes
+    return pdf.output(dest='S').encode('latin-1') # type: ignore[return-value]
 
 
 def start_research_task(query, uploaded_files):
     """Sends the research request to the FastAPI backend and updates chat history."""
-    files_payload = [('files', (file.name, file.type)) for file in uploaded_files] if uploaded_files else None
+    files_payload = [('files', (file.name, file.getvalue(), file.type)) for file in uploaded_files] if uploaded_files else None
     data = {'query': query, 'session_id': st.session_state.session_id}
-    print("total input content:", data, "files:", files_payload)
     try:
         with requests.post(f"{API_BASE_URL}/query", files=files_payload, data=data, stream=True) as r:
             if r.status_code != 200:
@@ -160,6 +195,10 @@ for message in st.session_state.messages:
                 st.subheader("Executive Summary")
                 st.markdown(report_data["executive_summary"])
 
+            if report_data.get("detailed_report"):
+                st.subheader("Detailed Report")
+                st.markdown(report_data["detailed_report"])
+
             if report_data.get("key_findings"):
                 st.subheader("Key Findings")
                 for finding in report_data["key_findings"]:
@@ -171,15 +210,24 @@ for message in st.session_state.messages:
                     st.markdown(f"**{visual.get('title', 'Visual')}**")
                     st.markdown(visual.get('description', ''))
                     if visual.get("file_id"):
-                        try:
-                            image_url = f"{API_BASE_URL}/files/{visual['file_id']}"
-                            response = requests.get(image_url)
-                            if response.status_code == 200:
-                                st.image(response.content)
-                            else:
-                                st.warning(f"Could not load image for file_id: {visual['file_id']}")
-                        except Exception as e:
-                            st.error(f"Error loading image: {e}")
+                        # Construct the full URL for the image
+                        image_url = f"{API_BASE_URL}{visual['file_id']}"
+                        st.image(image_url, caption=visual.get("description", "Generated Visual"))
+                        
+                        # Add a button to delete the image after viewing
+                        if st.button(f"Acknowledge and Remove Image: {visual.get('title')}", key=f"del_{visual['file_id']}"):
+                            try:
+                                # Make a request to the backend to delete the file
+                                delete_url = f"{API_BASE_URL}/files/{os.path.basename(visual['file_id'])}"
+                                response = requests.delete(delete_url)
+                                if response.status_code == 200:
+                                    st.success(f"Image {visual.get('title')} removed.")
+                                    # Optionally, rerun the app to hide the deleted image section
+                                    st.rerun()
+                                else:
+                                    st.error(f"Failed to remove image: {response.text}")
+                            except Exception as e:
+                                st.error(f"Error removing image: {e}")
             
             if report_data.get("conclusion"):
                 st.subheader("Conclusion")
@@ -191,6 +239,7 @@ for message in st.session_state.messages:
                     st.markdown(f"- {ref}")
 
             # Add download button for the report
+            print("Content of report_data:", report_data)
             pdf_report = create_pdf_report(report_data)
             st.download_button(
                 label="Download Report as PDF",
