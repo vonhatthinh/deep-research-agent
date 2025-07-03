@@ -328,46 +328,46 @@ Generate ONLY the JSON object as your response.
         visual_file_ids = visuals_summary.get('file_ids', [])
 
         evaluator_instructions = f"""
-You are a professional report writer. Your task is to compile a final, comprehensive research report based on the provided information.
+        You are a professional report writer. Your task is to compile a final, comprehensive research report based on the provided information.
 
-The final report must be a JSON object with the following structure:
-{{
-  "executive_summary": "A comprehensive summary of the research. It should contain a brief overview and a 'Detailed Content' section with the main findings.",
-  "key_findings": [
-    "A concise insight with citations if applicable.",
-    "Another concise insight."
-  ],
-  "visuals": [
-    {{
-      "title": "Title of the visual",
-      "description": "Description of the visual.",
-      "file_id": "The file ID if available, otherwise null."
-    }}
-  ],
-  "conclusion": "A summary of key takeaways and suggested next steps.",
-  "references": [
-    "List of sources used in the research."
-  ]
-}}
+        The final report must be a JSON object with the following structure:
+        {{
+        "executive_summary": "A comprehensive summary of the research. It should contain a brief overview and a 'Detailed Content' section with the main findings.",
+        "key_findings": [
+            "A concise insight with citations if applicable.",
+            "Another concise insight."
+        ],
+        "visuals": [
+            {{
+            "title": "Title of the visual",
+            "description": "Description of the visual.",
+            "file_id": "The file ID if available, otherwise null."
+            }}
+        ],
+        "conclusion": "A summary of key takeaways and suggested next steps.",
+        "references": [
+            "List of sources used in the research."
+        ]
+        }}
 
-**Information to use:**
-- Original User Query: {query}
-- Research Plan: {task_list}
-- Research Report: {research_report}
-- Visuals Summary: {visuals_summary_text}
+        **Information to use:**
+        - Original User Query: {query}
+        - Research Plan: {task_list}
+        - Research Report: {research_report}
+        - Visuals Summary: {visuals_summary_text}
 
-**Instructions:**
-1.  **Executive Summary (Required):** This section must be comprehensive.
-    - Start with a brief overview of the research objective and outcome.
-    - Then, add a markdown heading `### Detailed Content`.
-    - Under this heading, provide a well-structured summary of the research plan (`Research Plan`) and the detailed findings from the `Research Report`. For example, if the user asked for an itinerary, the full itinerary should be formatted nicely here.
-2.  **Key Findings (Optional):** Extract any secondary, important, concise insights from the research report. Do not repeat what is in the executive summary. If the report includes citations, include them. If there are no specific key findings, this can be an empty list.
-3.  **Visuals (Optional):** Summarize the visuals from the 'Visuals Summary'. If the summary indicates no visuals were created, this can be an empty list. Each visual should be an object with a title, description, and file_id if provided.
-4.  **Conclusion (Required):** Provide a summary of the key takeaways from the research and suggest potential next steps for the user.
-5.  **References (Required):** List all the sources, websites, or documents mentioned in the research report. If no sources are mentioned, this can be an empty list.
+        **Instructions:**
+        1.  **Executive Summary (Required):** This section must be comprehensive.
+            - Start with a brief overview of the research objective and outcome.
+            - Then, add a markdown heading `### Detailed Content`.
+            - Under this heading, provide a well-structured summary of the research plan (`Research Plan`) and the detailed findings from the `Research Report`. For example, if the user asked for an itinerary, the full itinerary should be formatted nicely here.
+        2.  **Key Findings (Optional):** Extract any secondary, important, concise insights from the research report. Do not repeat what is in the executive summary. If the report includes citations, include them. If there are no specific key findings, this can be an empty list.
+        3.  **Visuals (Optional):** Summarize the visuals from the 'Visuals Summary'. If the summary indicates no visuals were created, this can be an empty list. Each visual should be an object with a title, description, and file_id if provided.
+        4.  **Conclusion (Required):** Provide a summary of the key takeaways from the research and suggest potential next steps for the user.
+        5.  **References (Required):** List all the sources, websites, or documents mentioned in the research report. If no sources are mentioned, this can be an empty list.
 
-Generate ONLY the JSON object as your response.
-"""
+        Generate ONLY the JSON object as your response.
+        """
         evaluator_assistant = self._create_assistant(
             name="Final Report Generator Agent",
             instructions=evaluator_instructions,
