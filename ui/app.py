@@ -138,18 +138,18 @@ def create_pdf_report(report_data):
     return pdf.output(dest='S').encode('latin-1') # type: ignore[return-value]
 
 
-def start_research_task(query, uploaded_files):
-    """Sends the research request to the FastAPI backend and updates chat history."""
+def stream_research(query, uploaded_files):
+    """Generator function that streams the research process."""
     files_payload = [('files', (file.name, file.getvalue(), file.type)) for file in uploaded_files] if uploaded_files else None
     data = {'query': query, 'session_id': st.session_state.session_id}
+    
     try:
         with requests.post(f"{API_BASE_URL}/query", files=files_payload, data=data, stream=True) as r:
             if r.status_code != 200:
                 error_message = f"Error from server: {r.status_code} - {r.text}"
                 st.session_state.messages.append({'role': 'assistant', 'content': error_message, 'type': 'error'})
-                st.rerun() # Rerun to display the error
                 return
-            
+
             event_buffer = ""
             for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
                 event_buffer += chunk
@@ -166,34 +166,29 @@ def start_research_task(query, uploaded_files):
                     
                     if event_type and data_lines:
                         full_data = "".join(data_lines)
-                        print(f"Received Event: {event_type}, Data: {full_data}")
-
+                        
                         if event_type == 'thinking':
-                            st.session_state.messages.append({'role': 'assistant', 'content': full_data, 'type': 'thinking'})
+                            yield full_data + "\n"
+                            time.sleep(0.1)
                         elif event_type == 'report':
                             try:
                                 report_data = json.loads(full_data)
-                                # Check if it's a simple chat response or a full report
                                 if 'response' in report_data and len(report_data) == 1:
-                                    # This is a chat response
                                     st.session_state.messages.append({'role': 'assistant', 'content': report_data['response']})
                                 else:
-                                    # This is a full research report
-                                    st.session_state.messages.append({'role': 'assistant', 'content': "Here is the final research report:", 'type': 'report_intro'})
+                                    st.session_state.messages.append({'role': 'assistant', 'content': "Research complete. Here is the final report:", 'type': 'report_intro'})
                                     st.session_state.messages.append({'role': 'assistant', 'content': report_data, 'type': 'report_json'})
                             except json.JSONDecodeError:
-                                error_message = f"Failed to decode report JSON: {full_data}"
-                                st.session_state.messages.append({'role': 'assistant', 'content': error_message, 'type': 'error'})
+                                error_msg = f"Failed to decode report JSON: {full_data}"
+                                st.session_state.messages.append({'role': 'assistant', 'content': error_msg, 'type': 'error'})
                         elif event_type == 'error':
                             st.session_state.messages.append({'role': 'assistant', 'content': full_data, 'type': 'error'})
-            
-            # After processing all events, rerun to update the display
-            st.rerun()
-
+                        elif event_type == 'end':
+                            pass
+    
     except requests.exceptions.RequestException as e:
         error_message = f"Connection error: {e}"
         st.session_state.messages.append({'role': 'assistant', 'content': error_message, 'type': 'error'})
-        st.rerun() # Rerun to display the error
 
 
 # --- Main App Logic ---
@@ -290,8 +285,9 @@ debug_mode = st.checkbox("Enable debug mode")
 # --- FIX: Always trigger research task on new user input ---
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
-    with st.spinner("The agent is now conducting research... This may take a few minutes."):
-        start_research_task(query, uploaded_files)
+    with st.chat_message("assistant"):
+        st.write_stream(stream_research(query, uploaded_files))
+    st.rerun()
 
 
 if debug_mode:
