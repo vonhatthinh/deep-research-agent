@@ -7,6 +7,8 @@ import os
 import uuid
 from dotenv import load_dotenv
 from fpdf import FPDF
+import subprocess
+import socket
 
 load_dotenv()
 
@@ -18,6 +20,19 @@ st.set_page_config(page_title="Deep Research Assistant", layout="wide")
 
 st.title("🤖 Deep Research Assistant")
 st.markdown("Provide a topic, question, or document, and the AI agent will conduct in-depth research and compile a report.")
+
+# --- FastAPI Server Auto-Start ---
+def is_port_in_use(host, port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((host, port)) == 0
+
+if not is_port_in_use("0.0.0.0", 8000):
+    try:
+        subprocess.Popen([sys.executable, os.path.join(root_dir, "main.py")])
+        st.info("Starting backend server on 0.0.0.0:8000...")
+        time.sleep(2)  # Give the server a moment to start
+    except Exception as e:
+        st.error(f"Failed to start backend server: {e}")
 
 # --- State Management ---
 # Use a list to store the chat messages
@@ -209,23 +224,33 @@ for message in st.session_state.messages:
                 for visual in report_data["visuals"]:
                     st.markdown(f"**{visual.get('title', 'Visual')}**")
                     st.markdown(visual.get('description', ''))
-                    if visual.get("file_id"):
-                        # Construct the full URL for the image
-                        image_url = f"{API_BASE_URL}{visual['file_id']}"
-                        st.image(image_url, caption=visual.get("description", "Generated Visual"))
-                        
+                    file_id = visual.get("file_id")
+                    # --- FIX: Show image if file_id is in the format file-xxxx or file_xxxx ---
+                    if file_id:
+                        # If file_id is a local file path, show as before
+                        if str(file_id).startswith("/files/"):
+                            image_url = f"{API_BASE_URL}{file_id}"
+                            st.image(image_url, caption=visual.get("description", "Generated Visual"))
+                        # If file_id is an OpenAI file id (e.g., file-xxxx), fetch from backend
+                        elif str(file_id).startswith("file-") or str(file_id).startswith("file_"):
+                            image_url = f"{API_BASE_URL}/files/{file_id}"
+                            st.image(image_url, caption=visual.get("description", "Generated Visual"))
+                        else:
+                            st.markdown(f"Image ID: {file_id}")
                         # Add a button to delete the image after viewing
-                        if st.button(f"Acknowledge and Remove Image: {visual.get('title')}", key=f"del_{visual['file_id']}"):
+                        if st.button(f"Acknowledge and Remove Image: {visual.get('title')}", key=f"del_{file_id}"):
                             try:
-                                # Make a request to the backend to delete the file
-                                delete_url = f"{API_BASE_URL}/files/{os.path.basename(visual['file_id'])}"
-                                response = requests.delete(delete_url)
-                                if response.status_code == 200:
-                                    st.success(f"Image {visual.get('title')} removed.")
-                                    # Optionally, rerun the app to hide the deleted image section
-                                    st.rerun()
+                                # Make a request to the backend to delete the file (only for local files)
+                                if str(file_id).startswith("/files/"):
+                                    delete_url = f"{API_BASE_URL}/files/{os.path.basename(file_id)}"
+                                    response = requests.delete(delete_url)
+                                    if response.status_code == 200:
+                                        st.success(f"Image {visual.get('title')} removed.")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Failed to remove image: {response.text}")
                                 else:
-                                    st.error(f"Failed to remove image: {response.text}")
+                                    st.info("Cannot delete remote/OpenAI images from here.")
                             except Exception as e:
                                 st.error(f"Error removing image: {e}")
             
@@ -262,15 +287,11 @@ uploaded_files = st.file_uploader("Upload a document (optional)", type=['pdf', '
 # Start button will be triggered by the chat input
 debug_mode = st.checkbox("Enable debug mode")
 
+# --- FIX: Always trigger research task on new user input ---
 if query:
     st.session_state.messages.append({"role": "user", "content": query})
-
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    # Find the user query message
-    user_message = st.session_state.messages[-1]
-    if len(st.session_state.messages) == 1 or st.session_state.messages[-2]["role"] == "user":
-         with st.spinner("The agent is now conducting research... This may take a few minutes."):
-            start_research_task(user_message["content"], uploaded_files)
+    with st.spinner("The agent is now conducting research... This may take a few minutes."):
+        start_research_task(query, uploaded_files)
 
 
 if debug_mode:
